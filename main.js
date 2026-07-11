@@ -8,12 +8,14 @@ const obsidian = require('obsidian');
  *
  *  - Tab        : 한 단계 들여쓰기 (일반/빈 줄). 진짜 리스트는 기본 동작.
  *  - Shift+Tab  : 한 단계 해제 (마지막 단계면 ZWSP까지).
- *  - Enter      : 다음 줄에 같은 들여쓰기 유지 (IME 안전: 새 줄 생긴 뒤 덧붙임).
+ *  - Enter      : 다음 줄에 같은 들여쓰기 유지 (IME 안전 + 새 줄 생성 재시도).
  *  - Backspace  : 들여쓰기 영역에선 한 단계(NBSP 4개, 마지막이면 ZWSP까지) 한 번에 삭제.
  */
 const ZWSP = String.fromCharCode(0x200B);
 const NBSP = String.fromCharCode(0x00A0);
 const LEVEL = 4;
+const RE_INDENT = new RegExp('^(' + ZWSP + NBSP + '+)');          // ZWSP + NBSP들 (전체 들여쓰기)
+const RE_SPLIT = new RegExp('^(' + ZWSP + ')(' + NBSP + '*)');    // (ZWSP)(NBSP들)
 
 module.exports = class TabIndentNotion extends obsidian.Plugin {
   onload() {
@@ -35,25 +37,28 @@ module.exports = class TabIndentNotion extends obsidian.Plugin {
     const line = editor.getLine(from.line);
 
     // ===== Enter: 다음 줄에 같은 들여쓰기 유지 (IME 안전) =====
-    // preventDefault 하지 않고 기본 Enter가 새 줄을 만든 "뒤"에 들여쓰기를 덧붙인다.
-    // → 한글 조합 중 Enter(commit)에서도 안전하고, 새 줄이 실제로 생겼을 때만 덧붙는다.
+    // preventDefault 하지 않고, 기본 Enter가 새 줄을 "실제로 만든 뒤"에 들여쓰기를 붙인다.
+    // setTimeout(0) 한 번은 Obsidian이 새 줄을 만들기 전에 실행될 수 있어(타이밍),
+    // 새 줄이 생길 때까지 몇 번 재시도한다.
     if (key === 'Enter') {
       if (evt.shiftKey || from.line !== to.line || from.ch !== to.ch) return;
-      const m = line.match(/^(​ +)/);
-      if (m) {                                                    // NBSP 들여쓴 줄 → 다음 줄도 같은 들여쓰기
-        const indent = m[1];
-        const startLine = from.line;
-        setTimeout(() => {
-          try {
-            const cur = editor.getCursor();
-            if (cur.line > startLine && !editor.getLine(cur.line).startsWith(indent)) {
-              editor.replaceRange(indent, { line: cur.line, ch: 0 });
-              editor.setCursor({ line: cur.line, ch: cur.ch + indent.length });
-            }
-          } catch (e) {}
-        }, 0);
-        return;
-      }
+      const m = line.match(RE_INDENT);
+      if (!m) return;
+      const indent = m[1];
+      const startLine = from.line;
+      const apply = (tries) => {
+        let cur;
+        try { cur = editor.getCursor(); } catch (e) { return; }
+        if (cur.line > startLine) {                               // 새 줄이 실제로 생겼다
+          if (!editor.getLine(cur.line).startsWith(ZWSP)) {       // 아직 들여쓰기 없으면
+            editor.replaceRange(indent, { line: cur.line, ch: 0 });
+            editor.setCursor({ line: cur.line, ch: cur.ch + indent.length });
+          }
+        } else if (tries > 0) {
+          setTimeout(() => apply(tries - 1), 16);                 // 아직 안 생김 → 재시도
+        }
+      };
+      setTimeout(() => apply(4), 0);
       return;
     }
 
@@ -66,7 +71,7 @@ module.exports = class TabIndentNotion extends obsidian.Plugin {
       if (/^[ \t]*([-*+]|\d+\.)\s/.test(line)) return;            // 진짜 리스트 → 기본
 
       if (evt.shiftKey) {
-        const m = line.match(/^(​)( *)/);
+        const m = line.match(RE_SPLIT);
         if (m && m[2].length > 0) {
           evt.preventDefault(); evt.stopPropagation();
           const removeNbsp = Math.min(LEVEL, m[2].length);
@@ -93,7 +98,7 @@ module.exports = class TabIndentNotion extends obsidian.Plugin {
     if (key === 'Backspace') {
       if (evt.shiftKey) return;
       if (from.line !== to.line || from.ch !== to.ch) return;     // 선택 있음 → 기본
-      const m = line.match(/^(​)( *)/);
+      const m = line.match(RE_SPLIT);
       if (!m || m[2].length === 0) return;                        // 들여쓰기 없음 → 기본
       const indentEnd = 1 + m[2].length;
       if (from.ch < 1 || from.ch > indentEnd) return;             // 커서가 들여쓰기 밖 → 기본
