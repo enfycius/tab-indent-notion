@@ -42,23 +42,14 @@ module.exports = class TabIndentNotion extends obsidian.Plugin {
     // 새 줄이 생길 때까지 몇 번 재시도한다.
     if (key === 'Enter') {
       if (evt.shiftKey || from.line !== to.line || from.ch !== to.ch) return;
+      if (evt.isComposing) return;                                // 한글 조합 중엔 건드리지 않음 (IME 안전)
       const m = line.match(RE_INDENT);
       if (!m) return;
       const indent = m[1];
-      const startLine = from.line;
-      const apply = (tries) => {
-        let cur;
-        try { cur = editor.getCursor(); } catch (e) { return; }
-        if (cur.line > startLine) {                               // 새 줄이 실제로 생겼다
-          if (!editor.getLine(cur.line).startsWith(ZWSP)) {       // 아직 들여쓰기 없으면
-            editor.replaceRange(indent, { line: cur.line, ch: 0 });
-            editor.setCursor({ line: cur.line, ch: cur.ch + indent.length });
-          }
-        } else if (tries > 0) {
-          setTimeout(() => apply(tries - 1), 16);                 // 아직 안 생김 → 재시도
-        }
-      };
-      setTimeout(() => apply(4), 0);
+      // 새 줄 + 같은 들여쓰기를 '한 번에' 삽입 → 비동기 race 없음(들여쓰기 유실 방지).
+      evt.preventDefault(); evt.stopPropagation();
+      editor.replaceRange('\n' + indent, from, from);
+      editor.setCursor({ line: from.line + 1, ch: indent.length });
       return;
     }
 
