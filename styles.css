@@ -1,0 +1,3 @@
+/* 들여쓰기 맨 앞 ZWSP(U+200B) 가 편집 화면에서 세로 막대/특수문자 마커로
+   보이는 것을 숨긴다. (ZWSP 는 폭0 이라 숨겨도 위치/폭 영향 없음) */
+.markdown-source-view .cm-specialChar { display: none; }
