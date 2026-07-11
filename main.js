@@ -3,11 +3,12 @@ const obsidian = require('obsidian');
 
 /*
  * Tab Indent (Notion-style) — ZWSP+NBSP 방식
- * 줄 맨 앞 ZWSP(폭0, U+200B) 1개 + NBSP(U+00A0) 들여쓰기.
+ * 줄 맨 앞 ZWSP(폭0, U+200B) 1개 + NBSP(U+00A0) 들여쓰기. ZWSP가 맨 앞이라
+ * "공백으로 시작"하지 않아 Obsidian/블로그 모두 코드블록으로 보지 않는다.
+ *
  *  - Tab / Shift+Tab : 한 단계 들여쓰기 / 해제
  *  - Enter           : 다음 줄에 같은 들여쓰기 유지 (원자적, IME 안전)
  *  - Backspace       : 들여쓰기 한 단계 삭제
- *  - 자동 줄바꿈(soft-wrap) 시 감긴 줄도 들여쓰기에 맞춰 정렬 (CM6 행잉 인덴트)
  */
 const ZWSP = String.fromCharCode(0x200B);
 const NBSP = String.fromCharCode(0x00A0);
@@ -15,69 +16,9 @@ const LEVEL = 4;
 const RE_INDENT = new RegExp('^(' + ZWSP + NBSP + '+)');          // ZWSP + NBSP들 (전체 들여쓰기)
 const RE_SPLIT = new RegExp('^(' + ZWSP + ')(' + NBSP + '*)');    // (ZWSP)(NBSP들)
 
-// ── 감긴 줄도 들여쓰기 유지: CM6 라인 데코레이션(행잉 인덴트) ──
-// text-indent(-W) + padding-inline-start(W). W = 앞쪽 NBSP 실제 픽셀 폭.
-// → 첫 시각줄은 NBSP가 밀어낸 위치에서 시작, 감긴 줄도 같은 위치에서 시작.
-let cmExt = null;
-try {
-  const cmView = require('@codemirror/view');
-  const cmState = require('@codemirror/state');
-  const ViewPlugin = cmView.ViewPlugin, Decoration = cmView.Decoration;
-  const RangeSetBuilder = cmState.RangeSetBuilder;
-
-  let NBSP_PX = 0;
-  const measure = (view) => {
-    try {
-      const cs = getComputedStyle(view.contentDOM);
-      const span = document.createElement('span');
-      span.style.cssText = 'position:absolute;visibility:hidden;white-space:pre;top:-9999px;left:-9999px;';
-      span.style.fontFamily = cs.fontFamily;
-      span.style.fontSize = cs.fontSize;
-      span.style.fontWeight = cs.fontWeight;
-      span.style.letterSpacing = cs.letterSpacing;
-      span.textContent = NBSP.repeat(20);
-      document.body.appendChild(span);
-      const w = span.getBoundingClientRect().width / 20;
-      span.remove();
-      if (w > 0) NBSP_PX = w;
-    } catch (e) {}
-  };
-
-  const build = (view) => {
-    if (!NBSP_PX) measure(view);
-    const b = new RangeSetBuilder();
-    for (const rng of view.visibleRanges) {
-      let pos = rng.from;
-      while (pos <= rng.to) {
-        const ln = view.state.doc.lineAt(pos);
-        const m = ln.text.match(RE_INDENT);
-        if (m) {
-          const k = m[1].length - 1;                    // NBSP 개수 (ZWSP 제외)
-          const px = Math.round(k * (NBSP_PX || 6));
-          b.add(ln.from, ln.from, Decoration.line({
-            attributes: { style: 'text-indent:-' + px + 'px;padding-inline-start:' + px + 'px;' }
-          }));
-        }
-        pos = ln.to + 1;
-      }
-    }
-    return b.finish();
-  };
-
-  cmExt = ViewPlugin.fromClass(class {
-    constructor(view) { this.decorations = build(view); }
-    update(u) {
-      if (u.geometryChanged) NBSP_PX = 0;               // 폰트/크기 변화 시 재측정
-      if (u.docChanged || u.viewportChanged || u.geometryChanged) this.decorations = build(u.view);
-    }
-  }, { decorations: v => v.decorations });
-} catch (e) { cmExt = null; }
-
 module.exports = class TabIndentNotion extends obsidian.Plugin {
   onload() {
     this.registerDomEvent(document, 'keydown', this.onKeyDown.bind(this), { capture: true });
-    // [1.0.5 진단] 행잉인덴트(감긴 줄 정렬) 임시 비활성 — 세로 막대(커서 아티팩트) 원인 확인용.
-    // if (cmExt) { try { this.registerEditorExtension(cmExt); } catch (e) {} }
   }
 
   onKeyDown(evt) {
