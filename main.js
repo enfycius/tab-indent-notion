@@ -76,7 +76,8 @@ try {
 module.exports = class TabIndentNotion extends obsidian.Plugin {
   onload() {
     this.registerDomEvent(document, 'keydown', this.onKeyDown.bind(this), { capture: true });
-    if (cmExt) { try { this.registerEditorExtension(cmExt); } catch (e) {} }
+    // [1.0.5 진단] 행잉인덴트(감긴 줄 정렬) 임시 비활성 — 세로 막대(커서 아티팩트) 원인 확인용.
+    // if (cmExt) { try { this.registerEditorExtension(cmExt); } catch (e) {} }
   }
 
   onKeyDown(evt) {
