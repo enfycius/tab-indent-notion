@@ -15,6 +15,8 @@ const NBSP = String.fromCharCode(0x00A0);
 const LEVEL = 4;
 const RE_INDENT = new RegExp('^(' + ZWSP + NBSP + '+)');          // ZWSP + NBSP들 (전체 들여쓰기)
 const RE_SPLIT = new RegExp('^(' + ZWSP + ')(' + NBSP + '*)');    // (ZWSP)(NBSP들)
+// 리스트/체크박스 마커 — 앞에 ZWSP+NBSP 가짜 들여쓰기가 붙어 있어도 인식 (group1 = 가짜 들여쓰기)
+const RE_LIST = new RegExp('^(' + ZWSP + NBSP + '*)?[ \\t]*(?:[-*+]|\\d+[.)])\\s');
 
 // ── 감긴 줄(soft-wrap) 도 들여쓰기 유지: CM6 라인 데코레이션(행잉 인덴트) ──
 // text-indent(-W) + padding-inline-start(W). W = 앞쪽 NBSP 실제 픽셀 폭.
@@ -92,6 +94,7 @@ module.exports = class TabIndentNotion extends obsidian.Plugin {
     if (key === 'Enter') {
       if (evt.shiftKey || from.line !== to.line || from.ch !== to.ch) return;
       if (evt.isComposing) return;                                // 한글 조합 중엔 건드리지 않음
+      if (RE_LIST.test(line)) return;                             // 리스트/체크박스 → Obsidian 기본(자동 이어쓰기), 가짜 들여쓰기 전파 금지
       const m = line.match(RE_INDENT);
       if (!m) return;
       const indent = m[1];
@@ -108,7 +111,18 @@ module.exports = class TabIndentNotion extends obsidian.Plugin {
     // ===== Tab / Shift+Tab =====
     if (key === 'Tab') {
       if (from.line !== to.line) return;                          // 여러 줄 선택 → 기본
-      if (/^[ \t]*([-*+]|\d+\.)\s/.test(line)) return;            // 진짜 리스트 → 기본
+
+      // 리스트/체크박스: 가짜 들여쓰기(ZWSP+NBSP)를 절대 넣지 않는다 (마커가 깨져 - [ ] 로 보임).
+      const mList = line.match(RE_LIST);
+      if (mList) {
+        const fake = mList[1] || '';
+        if (fake.length) {                                        // 이미 가짜 들여쓰기가 붙어 깨진 체크박스 → 벗겨서 정상 복구
+          evt.preventDefault(); evt.stopPropagation();
+          editor.replaceRange('', { line: from.line, ch: 0 }, { line: from.line, ch: fake.length });
+          editor.setCursor({ line: from.line, ch: Math.max(0, from.ch - fake.length) });
+        }
+        return;                                                   // 깨끗한 리스트 → Obsidian 기본 Tab(부모가 있으면 네이티브 중첩)
+      }
 
       if (evt.shiftKey) {
         const m = line.match(RE_SPLIT);
