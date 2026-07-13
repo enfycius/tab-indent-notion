@@ -76,6 +76,25 @@ module.exports = class TabIndentNotion extends obsidian.Plugin {
   onload() {
     this.registerDomEvent(document, 'keydown', this.onKeyDown.bind(this), { capture: true });
     if (cmExt) { try { this.registerEditorExtension(cmExt); } catch (e) {} }
+    // 예전 1.1.0 버전이 남긴 <!--ti:N--> 마커를 볼트 전체에서 한 번에 제거하는 명령
+    this.addCommand({
+      id: 'strip-ti-markers',
+      name: 'Notion 들여쓰기 마커(<!--ti:N-->) 전체 제거',
+      callback: () => this.stripTiMarkers(),
+    });
+  }
+
+  async stripTiMarkers() {
+    const files = this.app.vault.getMarkdownFiles();
+    let changed = 0;
+    for (const f of files) {
+      try {
+        const c = await this.app.vault.read(f);
+        const nc = c.replace(/[ \t]*<!--ti:\d+-->/g, '');
+        if (nc !== c) { await this.app.vault.modify(f, nc); changed++; }
+      } catch (e) {}
+    }
+    new obsidian.Notice('ti 마커 제거 완료: ' + changed + '개 파일 정리');
   }
 
   onKeyDown(evt) {
