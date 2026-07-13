@@ -1,3 +1,18 @@
-/* 들여쓰기 맨 앞 ZWSP(U+200B) 가 편집 화면에서 세로 막대/특수문자 마커로
-   보이는 것을 숨긴다. (ZWSP 는 폭0 이라 숨겨도 위치/폭 영향 없음) */
-.markdown-source-view .cm-specialChar { display: none; }
+/* 들여쓰기 앞 ZWSP(U+200B)가 편집 화면에서 특수문자 마커(세로 막대)로
+   보이는 것을 숨긴다. (ZWSP는 폭0이라 숨겨도 위치/폭 영향 없음) */
+.markdown-source-view .cm-specialChar,
+.markdown-source-view .cm-highlightSpace { display: none !important; }
+
+/* 리스트/체크박스 등 실제 들여쓰기 줄에서 .cm-indent(들여쓰기 공백 span)에
+   그려지는 세로 가이드선을 제거한다. (일반 텍스트 ZWSP 들여쓰기와 톤 통일) */
+.markdown-source-view .cm-indent {
+  box-shadow: none !important;
+  border: none !important;
+  background: none !important;
+}
+.markdown-source-view .cm-indent::before,
+.markdown-source-view .cm-indent::after {
+  display: none !important;
+  box-shadow: none !important;
+  border: none !important;
+}
