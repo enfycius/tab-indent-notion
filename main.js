@@ -2,25 +2,30 @@
 const obsidian = require('obsidian');
 
 /*
- * Tab Indent (Notion-style) — ZWSP+NBSP 방식
- * 줄 맨 앞 ZWSP(폭0, U+200B) 1개 + NBSP(U+00A0) 들여쓰기. ZWSP가 맨 앞이라
- * "공백으로 시작"하지 않아 Obsidian/블로그 모두 코드블록으로 보지 않는다.
+ * Tab Indent (Notion-style)
+ *  - 일반 텍스트: 줄 앞 ZWSP(U+200B)+NBSP(U+00A0) 로 들여쓰기 (코드블록 안 됨, 실제 저장됨)
+ *  - 리스트/체크박스: 줄 끝에 숨김 마커 <!--ti:N--> 로 "레벨"만 저장하고, 편집기에서
+ *    CM6 데코레이션으로 시각적으로만 들여쓴다. 마커는 줄 끝이라 `- [ ]` 마커가 안 깨져
+ *    체크박스가 정상 렌더된다. (부모 없는 단독 체크박스도 자유롭게 들여쓰기 가능 = Notion식)
  *
- *  - Tab / Shift+Tab : 한 단계 들여쓰기 / 해제
- *  - Enter           : 다음 줄에 같은 들여쓰기 유지 (원자적, IME 안전)
- *  - Backspace       : 들여쓰기 한 단계 삭제
+ *  Tab / Shift+Tab : 한 단계 들여쓰기 / 해제
+ *  Enter           : 일반 텍스트는 같은 들여쓰기 유지 (리스트는 Obsidian 기본)
+ *  Backspace       : 일반 텍스트 들여쓰기 한 단계 삭제
  */
 const ZWSP = String.fromCharCode(0x200B);
 const NBSP = String.fromCharCode(0x00A0);
 const LEVEL = 4;
-const RE_INDENT = new RegExp('^(' + ZWSP + NBSP + '+)');          // ZWSP + NBSP들 (전체 들여쓰기)
+const INDENT_EM = 1.7;                                            // 리스트 시각 들여쓰기: 레벨당 em
+const RE_INDENT = new RegExp('^(' + ZWSP + NBSP + '+)');          // ZWSP + NBSP들 (일반 텍스트 들여쓰기)
 const RE_SPLIT = new RegExp('^(' + ZWSP + ')(' + NBSP + '*)');    // (ZWSP)(NBSP들)
-// 리스트/체크박스 마커 — 앞에 ZWSP+NBSP 가짜 들여쓰기가 붙어 있어도 인식 (group1 = 가짜 들여쓰기)
-const RE_LIST = new RegExp('^(' + ZWSP + NBSP + '*)?[ \\t]*(?:[-*+]|\\d+[.)])\\s');
+const RE_LISTLINE = new RegExp('^[\\s' + ZWSP + NBSP + ']*(?:[-*+]|\\d+[.)])\\s'); // 리스트/체크박스
+const RE_MARK = /\s*<!--ti:(\d+)-->\s*$/;                         // 리스트 시각 들여쓰기 마커
+const RE_LEADING = new RegExp('^[\\s' + ZWSP + NBSP + ']+');      // 줄 앞 공백/ZWSP/NBSP
 
-// ── 감긴 줄(soft-wrap) 도 들여쓰기 유지: CM6 라인 데코레이션(행잉 인덴트) ──
-// text-indent(-W) + padding-inline-start(W). W = 앞쪽 NBSP 실제 픽셀 폭.
-// @codemirror 모듈이 없으면 조용히 비활성(로드는 안 깨짐).
+function markLevel(text) { const m = text.match(RE_MARK); return m ? parseInt(m[1], 10) : 0; }
+function listBody(text) { return text.replace(RE_MARK, '').replace(RE_LEADING, ''); } // 마커·앞들여쓰기 제거한 순수 리스트 텍스트
+
+// ── CM6: 감긴 줄(일반 텍스트) 행잉 인덴트 + 리스트 마커 시각 들여쓰기/숨김 ──
 let cmExt = null;
 try {
   const cmView = require('@codemirror/view');
@@ -49,12 +54,22 @@ try {
       let pos = rng.from;
       while (pos <= rng.to) {
         const ln = view.state.doc.lineAt(pos);
-        const m = ln.text.match(RE_INDENT);
-        if (m) {
-          const px = Math.round((m[1].length - 1) * (NBSP_PX || 6));
+        const t = ln.text;
+        const mi = t.match(RE_INDENT);
+        const mk = t.match(RE_MARK);
+        if (mi) {
+          // 일반 텍스트 ZWSP+NBSP 들여쓰기 → 행잉 인덴트(감긴 줄 정렬)
+          const px = Math.round((mi[1].length - 1) * (NBSP_PX || 6));
           b.add(ln.from, ln.from, Decoration.line({
             attributes: { style: 'text-indent:-' + px + 'px;padding-inline-start:' + px + 'px;' }
           }));
+        } else if (mk) {
+          // 리스트/체크박스 마커 → 레벨만큼 시각 들여쓰기 + 마커 숨김
+          const lvl = parseInt(mk[1], 10);
+          b.add(ln.from, ln.from, Decoration.line({
+            attributes: { style: 'padding-inline-start:' + (lvl * INDENT_EM) + 'em;' }
+          }));
+          b.add(ln.from + mk.index, ln.from + t.length, Decoration.replace({}));
         }
         pos = ln.to + 1;
       }
@@ -79,7 +94,7 @@ module.exports = class TabIndentNotion extends obsidian.Plugin {
   onKeyDown(evt) {
     const key = evt.key;
     if (key !== 'Tab' && key !== 'Enter' && key !== 'Backspace') return;
-    if (evt.metaKey || evt.ctrlKey || evt.altKey) return;         // 조합키는 건드리지 않음
+    if (evt.metaKey || evt.ctrlKey || evt.altKey) return;
 
     const view = this.app.workspace.getActiveViewOfType(obsidian.MarkdownView);
     if (!view || view.getMode() !== 'source') return;
@@ -90,40 +105,43 @@ module.exports = class TabIndentNotion extends obsidian.Plugin {
     const to = editor.getCursor('to');
     const line = editor.getLine(from.line);
 
-    // ===== Enter: 다음 줄에 같은 들여쓰기 유지 (IME 안전) =====
+    // ===== Enter: 일반 텍스트만 같은 들여쓰기 유지 (리스트는 Obsidian 기본) =====
     if (key === 'Enter') {
       if (evt.shiftKey || from.line !== to.line || from.ch !== to.ch) return;
-      if (evt.isComposing) return;                                // 한글 조합 중엔 건드리지 않음
-      if (RE_LIST.test(line)) return;                             // 리스트/체크박스 → Obsidian 기본(자동 이어쓰기), 가짜 들여쓰기 전파 금지
+      if (evt.isComposing) return;
+      if (RE_LISTLINE.test(line)) return;                         // 리스트/체크박스 → Obsidian 기본(자동 이어쓰기)
       const m = line.match(RE_INDENT);
       if (!m) return;
       const indent = m[1];
-      // 새 줄 + 같은 들여쓰기를 '한 번에' 삽입 → race 없음(들여쓰기 유실 방지).
       evt.preventDefault(); evt.stopPropagation();
       editor.replaceRange('\n' + indent, from, from);
       editor.setCursor({ line: from.line + 1, ch: indent.length });
       return;
     }
 
-    // ↓ Tab / Backspace 는 한글 조합 중엔 비간섭
-    if (evt.isComposing) return;
+    if (evt.isComposing) return;                                  // Tab/Backspace 는 한글 조합 중 비간섭
 
     // ===== Tab / Shift+Tab =====
     if (key === 'Tab') {
       if (from.line !== to.line) return;                          // 여러 줄 선택 → 기본
 
-      // 리스트/체크박스: 가짜 들여쓰기(ZWSP+NBSP)를 절대 넣지 않는다 (마커가 깨져 - [ ] 로 보임).
-      const mList = line.match(RE_LIST);
-      if (mList) {
-        const fake = mList[1] || '';
-        if (fake.length) {                                        // 이미 가짜 들여쓰기가 붙어 깨진 체크박스 → 벗겨서 정상 복구
-          evt.preventDefault(); evt.stopPropagation();
-          editor.replaceRange('', { line: from.line, ch: 0 }, { line: from.line, ch: fake.length });
-          editor.setCursor({ line: from.line, ch: Math.max(0, from.ch - fake.length) });
-        }
-        return;                                                   // 깨끗한 리스트 → Obsidian 기본 Tab(부모가 있으면 네이티브 중첩)
+      // 리스트/체크박스: 줄 끝 마커로 레벨 조정 (시각 들여쓰기). 마커가 줄끝이라 체크박스 안 깨짐.
+      if (RE_LISTLINE.test(line)) {
+        evt.preventDefault(); evt.stopPropagation();
+        const level = markLevel(line);
+        const leadLen = (line.match(RE_LEADING) || [''])[0].length;
+        const body = listBody(line);
+        const newLevel = evt.shiftKey ? Math.max(0, level - 1) : level + 1;
+        const marker = newLevel > 0 ? (' <!--ti:' + newLevel + '-->') : '';
+        const newLine = body + marker;
+        editor.replaceRange(newLine, { line: from.line, ch: 0 }, { line: from.line, ch: line.length });
+        const bodyEnd = newLine.length - marker.length;
+        let nc = from.ch - leadLen; if (nc < 0) nc = 0; if (nc > bodyEnd) nc = bodyEnd;
+        editor.setCursor({ line: from.line, ch: nc });
+        return;
       }
 
+      // ↓ 일반 텍스트: ZWSP+NBSP 들여쓰기
       if (evt.shiftKey) {
         const m = line.match(RE_SPLIT);
         if (m && m[2].length > 0) {
@@ -148,14 +166,14 @@ module.exports = class TabIndentNotion extends obsidian.Plugin {
       return;
     }
 
-    // ===== Backspace: 들여쓰기 한 단계 한 번에 삭제 =====
+    // ===== Backspace: 일반 텍스트 들여쓰기 한 단계 삭제 =====
     if (key === 'Backspace') {
       if (evt.shiftKey) return;
-      if (from.line !== to.line || from.ch !== to.ch) return;     // 선택 있음 → 기본
+      if (from.line !== to.line || from.ch !== to.ch) return;
       const m = line.match(RE_SPLIT);
-      if (!m || m[2].length === 0) return;                        // 들여쓰기 없음 → 기본
+      if (!m || m[2].length === 0) return;
       const indentEnd = 1 + m[2].length;
-      if (from.ch < 1 || from.ch > indentEnd) return;             // 커서가 들여쓰기 밖 → 기본
+      if (from.ch < 1 || from.ch > indentEnd) return;
       evt.preventDefault(); evt.stopPropagation();
       let removeStart, removeEnd;
       if (from.ch === 1) {
