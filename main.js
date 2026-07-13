@@ -22,6 +22,18 @@ const RE_LISTLINE = new RegExp('^[\\s' + ZWSP + NBSP + ']*(?:[-*+]|\\d+[.)])\\s'
 const RE_FAKELEAD = new RegExp('^[' + ZWSP + NBSP + ']+');        // 줄 앞 ZWSP/NBSP (가짜 들여쓰기)
 const RE_MARK = /\s*<!--ti:(\d+)-->\s*$/;                         // 예전 버전이 남긴 시각 들여쓰기 마커
 
+// 줄 앞 공백의 "칸수"(탭=tabSize) 계산 → 들여쓰기 레벨 산출용
+function leadCols(str, tabSize) {
+  let cols = 0;
+  for (let i = 0; i < str.length; i++) {
+    const c = str[i];
+    if (c === '\t') cols += tabSize;
+    else if (c === ' ') cols += 1;
+    else break;
+  }
+  return cols;
+}
+
 // ── CM6: 감긴 줄(일반 텍스트 ZWSP 들여쓰기) 행잉 인덴트 ──
 let cmExt = null;
 try {
@@ -141,8 +153,22 @@ module.exports = class TabIndentNotion extends obsidian.Plugin {
           newLine = newLine.slice((newLine.match(RE_FAKELEAD) || [''])[0].length);
           editor.replaceRange(newLine, { line: from.line, ch: 0 }, { line: from.line, ch: line.length });
           editor.setCursor({ line: from.line, ch: Math.max(0, from.ch - leadLen) });
+          return;
         }
-        return;                                                   // 깨끗한 리스트 → Obsidian 기본 Tab
+        // 과도한 들여쓰기(바로 윗줄보다 2단계 이상 깊게) 차단 → 코드블록으로 깨지는 것 방지
+        if (!evt.shiftKey) {
+          let tabSize = 4;
+          try { tabSize = this.app.vault.getConfig('tabSize') || 4; } catch (e) {}
+          const curLevel = Math.floor(leadCols(line, tabSize) / tabSize);
+          let p = from.line - 1;
+          while (p >= 0 && editor.getLine(p).trim() === '') p--;
+          let prevLevel = -1;
+          if (p >= 0 && RE_LISTLINE.test(editor.getLine(p))) {
+            prevLevel = Math.floor(leadCols(editor.getLine(p), tabSize) / tabSize);
+          }
+          if (curLevel >= prevLevel + 1) { evt.preventDefault(); evt.stopPropagation(); return; }
+        }
+        return;                                                   // 유효 범위 → Obsidian 기본 Tab
       }
 
       // ↓ 일반 텍스트: ZWSP+NBSP 들여쓰기
