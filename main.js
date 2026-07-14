@@ -129,7 +129,24 @@ module.exports = class TabIndentNotion extends obsidian.Plugin {
     if (key === 'Enter') {
       if (evt.shiftKey || from.line !== to.line || from.ch !== to.ch) return;
       if (evt.isComposing) return;
-      if (RE_LISTLINE.test(line)) return;                         // 리스트/체크박스 → Obsidian 기본
+      if (RE_LISTLINE.test(line)) {
+        // 들여쓴 리스트/체크박스: Enter 시 같은 들여쓰기로 이어쓰기 (Obsidian이 단독 항목엔 안 이어주는 문제 보완)
+        const lead = (line.match(/^[ \t]+/) || [''])[0];
+        if (!lead) return;                                        // 최상위(들여쓰기 없음) → Obsidian 기본
+        const cb = line.match(/^[ \t]*([-*+]) \[.\] (.*)$/);      // 체크박스
+        let prefix, body;
+        if (cb) { prefix = lead + cb[1] + ' [ ] '; body = cb[2]; }
+        else {
+          const bu = line.match(/^[ \t]*([-*+]) (.*)$/);          // 불릿
+          if (!bu) return;                                        // 번호리스트 등 → Obsidian 기본
+          prefix = lead + bu[1] + ' '; body = bu[2];
+        }
+        if (body.trim() === '') return;                          // 빈 항목 → Obsidian 기본(리스트 빠져나가기)
+        evt.preventDefault(); evt.stopPropagation();
+        editor.replaceRange('\n' + prefix, from, from);
+        editor.setCursor({ line: from.line + 1, ch: prefix.length });
+        return;
+      }
       const m = line.match(RE_INDENT);
       if (!m) return;
       const indent = m[1];
