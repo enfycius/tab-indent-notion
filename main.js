@@ -148,11 +148,21 @@ module.exports = class TabIndentNotion extends obsidian.Plugin {
         return;
       }
       const m = line.match(RE_INDENT);
-      if (!m) return;
-      const indent = m[1];
-      evt.preventDefault(); evt.stopPropagation();
-      editor.replaceRange('\n' + indent, from, from);
-      editor.setCursor({ line: from.line + 1, ch: indent.length });
+      if (m) {                                                    // ZWSP+NBSP 들여쓴 일반 줄
+        const indent = m[1];
+        evt.preventDefault(); evt.stopPropagation();
+        editor.replaceRange('\n' + indent, from, from);
+        editor.setCursor({ line: from.line + 1, ch: indent.length });
+        return;
+      }
+      // 진짜 탭/공백으로 들여쓴 일반 줄 (예: 체크박스 아래 `→ 판단/설명`) → 같은 들여쓰기 유지
+      const rawLead = (line.match(/^[ \t]+/) || [''])[0];
+      if (rawLead && line.trim() !== '') {
+        evt.preventDefault(); evt.stopPropagation();
+        editor.replaceRange('\n' + rawLead, from, from);
+        editor.setCursor({ line: from.line + 1, ch: rawLead.length });
+        return;
+      }
       return;
     }
 
