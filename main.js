@@ -156,9 +156,9 @@ module.exports = class TabIndentNotion extends obsidian.Plugin {
         editor.setCursor({ line: from.line + 1, ch: indent.length });
         return;
       }
-      // 진짜 탭/공백으로 들여쓴 일반 줄 (예: 체크박스 아래 `→ 판단/설명`) → 같은 들여쓰기 유지
-      const rawLead = (line.match(/^[ \t]+/) || [''])[0];
-      if (rawLead && line.trim() !== '') {
+      // 들여쓴 일반 줄 (탭/공백/ZWSP+공백 혼합 모두, 예: 체크박스 아래 `→ 판단/설명`) → 같은 들여쓰기 유지
+      const rawLead = (line.match(RE_LEADWS) || [''])[0];
+      if (rawLead.length > 0 && line.slice(rawLead.length).trim() !== '') {
         evt.preventDefault(); evt.stopPropagation();
         editor.replaceRange('\n' + rawLead, from, from);
         editor.setCursor({ line: from.line + 1, ch: rawLead.length });
@@ -201,7 +201,33 @@ module.exports = class TabIndentNotion extends obsidian.Plugin {
         return;                                                   // 유효 범위 → Obsidian 기본 Tab
       }
 
-      // ↓ 일반 텍스트: ZWSP+NBSP 들여쓰기
+      // ── 리스트 문맥인지 판정 (위로 올라가며) ──
+      let pv = from.line - 1, inList = false;
+      while (pv >= 0) {
+        const L = editor.getLine(pv);
+        if (L.trim() === '') { pv--; continue; }
+        if (RE_LISTLINE.test(L)) { inList = true; break; }       // 리스트 항목 발견 → 리스트 안
+        if ((L.match(RE_LEADWS) || [''])[0].length > 0) { pv--; continue; }  // 들여쓴 줄 → 계속 위로
+        break;                                                    // 들여쓰기 없는 일반 줄 → 리스트 아님
+      }
+
+      // 리스트 안의 일반 줄(`→ 설명` 등)은 **진짜 탭**으로 들여써야 리스트 연속줄로 인식됨
+      if (inList) {
+        if (evt.shiftKey) {
+          if (/^[ \t]/.test(line)) {
+            evt.preventDefault(); evt.stopPropagation();
+            editor.replaceRange('', { line: from.line, ch: 0 }, { line: from.line, ch: 1 });
+            editor.setCursor({ line: from.line, ch: Math.max(0, from.ch - 1) });
+          }
+          return;
+        }
+        evt.preventDefault(); evt.stopPropagation();
+        editor.replaceRange('\t', { line: from.line, ch: 0 });
+        editor.setCursor({ line: from.line, ch: from.ch + 1 });
+        return;
+      }
+
+      // ↓ 리스트 밖 일반 텍스트: ZWSP+NBSP 들여쓰기 (코드블록 회피)
       if (evt.shiftKey) {
         const m = line.match(RE_SPLIT);
         if (m && m[2].length > 0) {
