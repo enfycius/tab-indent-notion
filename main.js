@@ -21,6 +21,7 @@ const RE_SPLIT = new RegExp('^(' + ZWSP + ')(' + NBSP + '*)');    // (ZWSP)(NBSP
 const RE_LISTLINE = new RegExp('^[\\s' + ZWSP + NBSP + ']*(?:[-*+]|\\d+[.)])\\s'); // 리스트/체크박스
 // 리스트/체크박스 "마커" 전체(앞 들여쓰기 + 불릿/번호 + 공백 + 선택적 [ ]/[x] + 공백)
 const RE_LISTMARKER = new RegExp('^([\\s' + ZWSP + NBSP + ']*(?:[-*+]|\\d+[.)])[ \\t](?:\\[.\\][ \\t])?)');
+const RE_LEADWS = new RegExp('^[\\s' + ZWSP + NBSP + ']*');       // 줄 앞 들여쓰기(탭/공백/ZWSP/NBSP)
 const RE_FAKELEAD = new RegExp('^[' + ZWSP + NBSP + ']+');        // 줄 앞 ZWSP/NBSP (가짜 들여쓰기)
 const RE_MARK = /\s*<!--ti:(\d+)-->\s*$/;                         // 예전 버전이 남긴 시각 들여쓰기 마커
 
@@ -233,9 +234,11 @@ module.exports = class TabIndentNotion extends obsidian.Plugin {
       if (RE_LISTLINE.test(line)) {
         const mm = line.match(RE_LISTMARKER);
         if (mm && from.ch === mm[1].length) {
+          // 마커('- [ ] ')만 지우고 **앞 들여쓰기는 유지** → 그 자리에 `→ 설명` 같은 텍스트를 쓸 수 있음
+          const lead = (line.match(RE_LEADWS) || [''])[0];
           evt.preventDefault(); evt.stopPropagation();
-          editor.replaceRange('', { line: from.line, ch: 0 }, { line: from.line, ch: mm[1].length });
-          editor.setCursor({ line: from.line, ch: 0 });
+          editor.replaceRange('', { line: from.line, ch: lead.length }, { line: from.line, ch: mm[1].length });
+          editor.setCursor({ line: from.line, ch: lead.length });
         }
         return;                                                   // 그 외 위치 → Obsidian 기본
       }
