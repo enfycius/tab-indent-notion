@@ -87,10 +87,34 @@ try {
   }, { decorations: v => v.decorations });
 } catch (e) { cmExt = null; }
 
+// ── CM6: '*' 한 번 입력했을 때 '**' 가 되는 것을 막는다 ──
+// 옵시디언 기본 설정 "Auto pair Markdown syntax" 는 '*' 를 치면 닫는 '*' 까지 넣어
+// '**' 를 만든다. 그 설정을 끄면 백틱(`)·하이라이트(==)·밑줄(_) 자동 짝맞춤까지
+// 전부 같이 꺼지므로, 여기서 '*' 만 골라서 막는다.
+// Prec.highest 로 옵시디언 기본 핸들러보다 먼저 잡는다.
+let starExt = null;
+try {
+  const cmView = require('@codemirror/view');
+  const cmState = require('@codemirror/state');
+  const EditorView = cmView.EditorView, Prec = cmState.Prec;
+  starExt = Prec.highest(EditorView.inputHandler.of((view, from, to, text) => {
+    if (text !== '*') return false;
+    // 선택 영역이 있으면 '선택한 글자를 *로 감싸기' 기본 동작을 살린다
+    if (from !== to) return false;
+    view.dispatch({
+      changes: { from, to, insert: '*' },
+      selection: { anchor: from + 1 },
+      userEvent: 'input.type',
+    });
+    return true;
+  }));
+} catch (e) { starExt = null; }
+
 module.exports = class TabIndentNotion extends obsidian.Plugin {
   onload() {
     this.registerDomEvent(document, 'keydown', this.onKeyDown.bind(this), { capture: true });
     if (cmExt) { try { this.registerEditorExtension(cmExt); } catch (e) {} }
+    if (starExt) { try { this.registerEditorExtension(starExt); } catch (e) {} }
     // 예전 1.1.0 버전이 남긴 <!--ti:N--> 마커를 볼트 전체에서 한 번에 제거하는 명령
     this.addCommand({
       id: 'strip-ti-markers',
